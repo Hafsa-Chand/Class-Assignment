@@ -1,80 +1,73 @@
-from agents import Agent, Runner, OpenAIChatCompletionsModel, RunContextWrapper, set_tracing_disabled, AsyncOpenAI, function_tool, ReasoningItem
-import asyncio
-from pydantic import BaseModel
-from dotenv import load_dotenv
 import os
+from dotenv import load_dotenv
+import google.generativeai as genai
 
+# === Environment Setup ===
 load_dotenv()
+API_KEY = os.getenv("GOOGLE_API_KEY")
+genai.configure(api_key=API_KEY)
 
-set_tracing_disabled(disabled=True)
+# AI model setup
+bot_model = genai.GenerativeModel("gemini-1.5-flash")
 
-provider = AsyncOpenAI(
-    api_key=os.getenv("GEMINI_API_KEY"),
-    base_url="https://generativelanguage.googleapis.com/v1beta/openai"
-)
+# === Inventory Data Store ===
+inventory_data = []
 
-model = OpenAIChatCompletionsModel(
-    model="gemini-2.0-flash",
-    openai_client=provider
-)
+# === Inventory Operations ===
+def add_item(prod_id: int, prod_name: str, prod_qty: int, prod_action: str):
+    entry = {
+        "product_id": prod_id,
+        "name": prod_name,
+        "qty": prod_qty,
+        "action": prod_action
+    }
+    inventory_data.append(entry)
+    return f"✅ Item added: {prod_name} | ID: {prod_id}, Qty: {prod_qty}, Action: {prod_action}"
 
-inventory = []
+def remove_item(prod_id: int):
+    for idx, entry in enumerate(inventory_data):
+        if entry["product_id"] == prod_id:
+            inventory_data.pop(idx)
+            return f"🗑️ Product with ID {prod_id} removed."
+    return f"❌ No record exists with ID {prod_id}."
 
-@function_tool
-def addItem(product_id:int, itemName:str, itemQuantity:str, operation:str):
-    if not product_id:
-        return "Product id not recieved"
-    inventory.append({"id":product_id, "itemName": itemName, "itemQuantity": itemQuantity, "operation": operation})
-    return f"Product Id is: {inventory["product_id"]}, Product Name is: {inventory["itemName"]}, Product Quantity is: {inventory["itemQuantity"]}, Operation is: {inventory["operation"]}"
+def update_item(prod_id: int, prod_name: str, prod_qty: int, prod_action: str):
+    for idx, entry in enumerate(inventory_data):
+        if entry["product_id"] == prod_id:
+            inventory_data[idx] = {
+                "product_id": prod_id,
+                "name": prod_name,
+                "qty": prod_qty,
+                "action": prod_action
+            }
+            return f"🔄 Product {prod_id} updated → {prod_name}, Qty: {prod_qty}, Action: {prod_action}"
+    return f"❌ No product found with ID {prod_id}."
 
-@function_tool
-def deleteItem(product_id:int):
-    if not product_id:
-        return "Product Not Found!"
-    for i,item in enumerate(inventory):
-        if item["product_id"] == product_id:
-            inventory.pop(i)
-            return f"Product with id {product_id} removed successfully."
-    return f"Product with id {product_id} not found in inventory."
-
-@function_tool
-def updateItem(product_id:int, itemName:str, itemQuantity:int, operation:str):
-    for i, item in enumerate(inventory):
-        if item["product_id"] == product_id:
-            inventory.pop(i)
-            inventory.append({"id":product_id, "itemName": itemName, "itemQuantity": itemQuantity, "operation": operation})
-            return f"Product with id {product_id} update successfully."
-    return f"Product with id {product_id} not found in inventory."
-
-
-inventoryAgent = Agent(
-    name="InventoryAgent",
-    instructions="""
-You can manage the inventory using these commands:
-
-1. addItem(product_id, itemName, itemQuantity, operation)
-   - Adds a new item to the inventory.
-   - Example: addItem(101, "Laptop", 5, "add")
-
-2. deleteItem(product_id)
-   - Deletes an item from inventory by product_id.
-   - Example: deleteItem(101)
-
-3. updateItem(product_id, itemName, itemQuantity, operation)
-   - Updates the details of an existing item by product_id.
-   - Example: updateItem(101, "Laptop Pro", 3, "update")
-
-Use these commands to add, delete, or update items in the inventory.
-""",
-    model=model,
-    tools=[addItem, deleteItem, updateItem]
-)
-
-memory = []
+# === Chat Handler ===
+print("🤖 Inventory Assistant Ready (type 'exit' anytime to stop)")
 
 while True:
-    user_input = input("Ask: ")
-    memory.append({"role": "user", "content": user_input})
-    result = Runner.run_sync(inventoryAgent, memory)
-    memory.append({"role": "assistant", "content": result.final_output})
-    print(result.final_output)
+    user_input = input("You: ").lower().strip()
+    if user_input == "exit":
+        break
+
+    if "add" in user_input:
+        pid = int(input("Enter Product ID: "))
+        pname = input("Enter Product Name: ")
+        qty = int(input("Enter Quantity: "))
+        result = add_item(pid, pname, qty, "add")
+
+    elif "update" in user_input:
+        pid = int(input("Enter Product ID: "))
+        pname = input("Enter New Name: ")
+        qty = int(input("Enter New Quantity: "))
+        result = update_item(pid, pname, qty, "update")
+
+    elif "remove" in user_input:
+        pid = int(input("Enter Product ID to remove: "))
+        result = remove_item(pid)
+
+    else:
+        result = "🤔 I couldn’t figure out what to do. Try add/update/remove."
+
+    print("Bot:", result)
